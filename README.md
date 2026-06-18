@@ -135,7 +135,7 @@ El convertidor analógico-digital de 24 bits HX711 se comunica a través de una 
 3.  **Filtro IIR (Respuesta al Impulso Infinita):**
     Para mitigar las fluctuaciones espurias debidas al ruido eléctrico de la celda de carga, el dato crudo pasa por un filtro de paso bajo IIR de primer orden modelado matemáticamente mediante desplazamientos de bits (desplazamientos lógicos a la derecha para simular divisiones de potencias de 2):
     
-    $$\text{next\_filtered\_raw\_data} = \text{filtered\_raw\_data} + \frac{\text{raw\_data\_reg} - \text{filtered\_raw\_data}}{2^{\text{FILTER\_SHIFT}}}$$
+    $$\text{next\\_filtered\\_raw\\_data} = \text{filtered\\_raw\\_data} + \frac{\text{raw\\_data\\_reg} - \text{filtered\\_raw\\_data}}{2^{\text{FILTER\\_SHIFT}}}$$
     
     *   Si `FILTER_SHIFT` es 2 (rápido), la balanza reacciona rápido (~1 segundo). Si es 4, filtra mucho más ruido pero tarda un poco más en estabilizarse.
     *   En los primeros 10 ciclos tras el arranque (`filter_init_counter < 10`), el filtro se salta para cargarse directamente con el valor real y no arrancar con lecturas erróneas desde cero.
@@ -144,7 +144,7 @@ El convertidor analógico-digital de 24 bits HX711 se comunica a través de una 
     *   **Resta de Offset:** Se calcula el valor neto del peso restando el offset guardado: `net_data = active_filtered_data - offset_reg`.
     *   **Escalado:** Para obtener gramos reales, se multiplica por un factor de calibración (`SCALE_MULT`) y se desplaza hacia la derecha (`SCALE_SHIFT` posiciones) para simular una división fraccionaria de punto fijo de precisión:
         
-        $$\text{scaled\_data} = \frac{\text{net\_data} \times \text{SCALE\_MULT}}{2^{\text{SCALE\_SHIFT}}}$$
+        $$\text{scaled\\_data} = \frac{\text{net\\_data} \times \text{SCALE\\_MULT}}{2^{\text{SCALE\\_SHIFT}}}$$
 
 5.  **Conversión Binario a BCD (Algoritmo Double Dabble):**
     Una vez obtenido el valor absoluto del peso en gramos como un número binario estándar (`abs_weight_bin`), se pasa por un bloque combinacional que ejecuta el algoritmo *Double Dabble* (desplazar y sumar 3). Este algoritmo toma el número binario de 14 bits y entrega 4 grupos de 4 bits representativos de los dígitos decimales (Miles, Centenas, Decenas y Unidades) para su fácil impresión en pantalla.
