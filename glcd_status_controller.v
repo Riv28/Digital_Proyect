@@ -31,11 +31,12 @@ module glcd_status_controller (
     reg [15:0] cooldown_ticks_reg;
     reg cooldown_active_reg;
     reg [2:0] fsm_state_reg;
+    reg pending_clear; // Para detectar cambios de estado y limpiar pantalla
     
     reg refresh_req;
     reg [16:0] refresh_timer; // 100,000 ciclos a 1 MHz = 100 ms
 
-    // Actualización de los registros de entrada en el dominio rápido
+    // Actualización de los registros de entrada en el dominio de 1 MHz
     always @(posedge clk_50mhz or negedge rst_n) begin
         if (!rst_n) begin
             sound_active_reg    <= 1'b0;
@@ -45,15 +46,24 @@ module glcd_status_controller (
             cooldown_ticks_reg  <= 16'd0;
             cooldown_active_reg <= 1'b0;
             fsm_state_reg       <= 3'd0;
-        end else begin
-            // Captura continua de entradas
-            sound_active_reg    <= sound_active;
-            weight_bcd_reg      <= weight_bcd;
-            weight_sign_reg     <= weight_sign;
-            motor_active_reg    <= motor_active;
-            cooldown_ticks_reg  <= cooldown_ticks;
-            cooldown_active_reg <= cooldown_active;
-            fsm_state_reg       <= fsm_state;
+            pending_clear       <= 1'b0;
+        end else if (clk_en_1mhz) begin
+            // Detectar cambios de estado en cualquier momento para forzar borrado
+            if (fsm_state != fsm_state_reg) begin
+                pending_clear <= 1'b1;
+            end else if (state == ST_CLEAR_PAGE) begin
+                pending_clear <= 1'b0;
+            end
+
+            if (state == ST_IDLE) begin
+                sound_active_reg    <= sound_active;
+                weight_bcd_reg      <= weight_bcd;
+                weight_sign_reg     <= weight_sign;
+                motor_active_reg    <= motor_active;
+                cooldown_ticks_reg  <= cooldown_ticks;
+                cooldown_active_reg <= cooldown_active;
+                fsm_state_reg       <= fsm_state;
+            end
         end
     end
 
@@ -71,7 +81,7 @@ module glcd_status_controller (
     reg [4:0] return_state;
     reg [15:0] init_timer;
     
-    reg [1:0] line_idx;  // 4 líneas (0 a 3)
+    reg [2:0] line_idx;  // 5 líneas (0 a 4)
     reg [4:0] char_idx;  // 21 caracteres por línea (0 a 20)
     reg [2:0] pixel_col; // 6 columnas de píxeles por caracter (0 a 5)
     
@@ -86,7 +96,7 @@ module glcd_status_controller (
     always @(*) begin
         char_code = 8'h20; // Por defecto espacio
         case (line_idx)
-            2'd0: begin // Línea 0 (Página 1)
+            3'd0: begin // Línea 0 (Página 1)
                 case (fsm_state_reg)
                     3'd0: begin // TODAVIA FALTA QUE
                         case (char_idx)
@@ -198,7 +208,7 @@ module glcd_status_controller (
                 endcase
             end
             
-            2'd1: begin // Línea 1 (Página 3)
+            3'd1: begin // Línea 1 (Página 3)
                 case (fsm_state_reg)
                     3'd0, 3'd1: begin // COMAS GATITO
                         case (char_idx)
@@ -287,7 +297,7 @@ module glcd_status_controller (
                 endcase
             end
             
-            2'd2: begin // Línea 2 (Página 5)
+            3'd2: begin // Línea 2 (Página 5 para otros, Página 3 para ST_COOLDOWN)
                 case (fsm_state_reg)
                     3'd2, 3'd3: begin // PESO:       [valor] g
                         case (char_idx)
@@ -345,7 +355,7 @@ module glcd_status_controller (
                 endcase
             end
             
-            2'd3: begin // Línea 3 (Página 7)
+            3'd3: begin // Línea 3 (Página 7 para otros, Página 5 para ST_COOLDOWN)
                 case (fsm_state_reg)
                     3'd4: begin // SANO:       [tiempo] s
                         case (char_idx)
@@ -367,6 +377,38 @@ module glcd_status_controller (
                                     5'd13: char_code = {4'b0011, val_ones};  // Unidades
                                     5'd14: char_code = 8'h20; // Espacio
                                     5'd15: char_code = 8'h73; // 's'
+                                    default: char_code = 8'h20;
+                                endcase
+                            end
+                        endcase
+                    end
+                    default: char_code = 8'h20;
+                endcase
+            end
+
+            3'd4: begin // Línea 4 (Página 6 para ST_COOLDOWN)
+                case (fsm_state_reg)
+                    3'd4: begin // PESO:       [valor] g
+                        case (char_idx)
+                            5'd0:  char_code = 8'h50; // 'P'
+                            5'd1:  char_code = 8'h45; // 'E'
+                            5'd2:  char_code = 8'h53; // 'S'
+                            5'd3:  char_code = 8'h4F; // 'O'
+                            5'd4:  char_code = 8'h3A; // ':'
+                            5'd5:  char_code = 8'h20;
+                            5'd6:  char_code = 8'h20;
+                            5'd7:  char_code = 8'h20;
+                            5'd8:  char_code = 8'h20;
+                            5'd9:  char_code = 8'h20;
+                            default: begin
+                                case (char_idx)
+                                    5'd10: char_code = weight_sign_reg ? 8'h2D : 8'h20; // '-' o ' '
+                                    5'd11: char_code = {4'b0011, weight_bcd_reg[15:12]}; // Miles
+                                    5'd12: char_code = {4'b0011, weight_bcd_reg[11:8]};  // Centenas
+                                    5'd13: char_code = {4'b0011, weight_bcd_reg[7:4]};   // Decenas
+                                    5'd14: char_code = {4'b0011, weight_bcd_reg[3:0]};   // Unidades
+                                    5'd15: char_code = 8'h20; // Espacio
+                                    5'd16: char_code = 8'h67; // 'g'
                                     default: char_code = 8'h20;
                                 endcase
                             end
@@ -450,10 +492,15 @@ module glcd_status_controller (
                 end
                 
                 ST_IDLE: begin
-                    if (refresh_req) begin
+                    if (pending_clear) begin
+                        // Al cambiar de estado de FSM, forzamos un borrado completo de la pantalla
+                        page         <= 3'd0;
+                        clear_col    <= 6'd0;
+                        state        <= ST_CLEAR_PAGE;
+                    end else if (refresh_req) begin
                         refresh_req <= 1'b0;
                         char_idx  <= 5'd0;
-                        line_idx  <= 2'd0;
+                        line_idx  <= 3'd0;
                         pixel_col <= 3'd0;
                         state     <= ST_SET_PAGE;
                     end
@@ -462,14 +509,27 @@ module glcd_status_controller (
                 ST_SET_PAGE: begin
                     if (drv_ready) begin
                         drv_rs <= 1'b0; 
-                        // Mapeo de la línea física de página (1, 3, 5 o 7)
-                        case (line_idx)
-                            2'd0: drv_byte <= 8'hB8 | 8'h01; // Página 1
-                            2'd1: drv_byte <= 8'hB8 | 8'h03; // Página 3
-                            2'd2: drv_byte <= 8'hB8 | 8'h05; // Página 5
-                            2'd3: drv_byte <= 8'hB8 | 8'h07; // Página 7
-                            default: drv_byte <= 8'hB8 | 8'h01;
-                        endcase
+                        // Mapeo dinámico de la página física
+                        if (fsm_state_reg == 3'd4) begin
+                            // Para ST_COOLDOWN (5 líneas)
+                            case (line_idx)
+                                3'd0: drv_byte <= 8'hB8 | 8'h01; // Página 1: "ESTAMOS ESPERANDO QUE"
+                                3'd1: drv_byte <= 8'hB8 | 8'h03; // Página 3: "TERMINES DE COMER"
+                                3'd2: drv_byte <= 8'hB8 | 8'h05; // Página 5: "GATITO PARA QUE ESTES"
+                                3'd3: drv_byte <= 8'hB8 | 8'h06; // Página 6: "SANO:       [tiempo] s"
+                                3'd4: drv_byte <= 8'hB8 | 8'h07; // Página 7: "PESO:       [valor] g"
+                                default: drv_byte <= 8'hB8 | 8'h01;
+                            endcase
+                        end else begin
+                            // Para otros estados (máximo 4 líneas)
+                            case (line_idx)
+                                3'd0: drv_byte <= 8'hB8 | 8'h01; // Página 1
+                                3'd1: drv_byte <= 8'hB8 | 8'h03; // Página 3
+                                3'd2: drv_byte <= 8'hB8 | 8'h05; // Página 5
+                                3'd3: drv_byte <= 8'hB8 | 8'h07; // Página 7
+                                default: drv_byte <= 8'hB8 | 8'h01;
+                            endcase
+                        end
                         
                         // Seleccionamos ambos chips para configurar la página simultáneamente
                         drv_cs1 <= 1'b1;
@@ -505,8 +565,8 @@ module glcd_status_controller (
                             pixel_col <= 3'd0;
                             if (char_idx == 5'd20) begin
                                 char_idx <= 5'd0;
-                                if (line_idx == 2'd3) begin
-                                    line_idx     <= 2'd0;
+                                if ((fsm_state_reg == 3'd4 && line_idx == 3'd4) || (fsm_state_reg != 3'd4 && line_idx == 3'd3)) begin
+                                    line_idx     <= 3'd0;
                                     return_state <= ST_IDLE; // Dibujó toda la pantalla, vuelve al reposo
                                 end else begin
                                     line_idx     <= line_idx + 1'b1;
@@ -553,7 +613,7 @@ module glcd_status_controller (
                             if (page == 3'd7) begin
                                 page         <= 3'd0;
                                 char_idx     <= 5'd0;
-                                line_idx     <= 2'd0;
+                                line_idx     <= 3'd0;
                                 pixel_col    <= 3'd0;
                                 return_state <= ST_SET_PAGE; 
                             end else begin

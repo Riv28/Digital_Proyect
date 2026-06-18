@@ -39,7 +39,7 @@ module top_principal (
     // localparam [15:0] COOLDOWN_SECS = 16'd7200;
 
     // === LÍMITE DE PESO ESTABLECIDO ===
-    localparam [15:0] TARGET_WEIGHT_BCD = 16'h0040; // 40 gramos (En BCD)
+    localparam [15:0] TARGET_WEIGHT_BCD = 16'h0020; // 20 gramos (En BCD)
 
     // 1. Pulso Habilitador de 1 MHz para la pantalla (1 ciclo clk_50mhz cada 1 us)
     reg [5:0] clk_div_1mhz;
@@ -60,6 +60,24 @@ module top_principal (
         end
     end
 
+    // --- Temporizador de Retardo de Inicio para Filtro de Glitches (2 segundos a 50 MHz) ---
+    reg [26:0] startup_cnt;
+    reg startup_done;
+
+    always @(posedge clk_50mhz or negedge rst_n) begin
+        if (!rst_n) begin
+            startup_cnt  <= 27'd0;
+            startup_done <= 1'b0;
+        end else begin
+            if (startup_cnt < 27'd100_000_000) begin // 2 segundos
+                startup_cnt <= startup_cnt + 1'b1;
+                startup_done <= 1'b0;
+            end else begin
+                startup_done <= 1'b1;
+            end
+        end
+    end
+
     // 2. Reloj de Tick (1 ms) para los retardos internos
     reg [15:0] clk_div_ms;
     reg tick_ms;
@@ -69,7 +87,7 @@ module top_principal (
             clk_div_ms <= 16'd0;
             tick_ms    <= 1'b0;
         end else begin
-            if (clk_div_ms == 16'd24999) begin // 25,000 ciclos clk_50mhz = 1 ms a 50 MHz
+            if (clk_div_ms == 16'd49999) begin // 50,000 ciclos clk_50mhz = 1 ms a 50 MHz
                 clk_div_ms <= 16'd0;
                 tick_ms    <= 1'b1; 
             end else begin
@@ -189,10 +207,12 @@ module top_principal (
                     timer_ms     <= 16'd0;
                     cooldown_sec <= 16'd0;
                     
-                    if (w_sound_pulse) begin
-                        state <= ST_TARE;
-                    end else if (tare_btn_pressed) begin
-                        state <= ST_TARE;
+                    if (startup_done) begin
+                        if (w_sound_pulse) begin
+                            state <= ST_TARE;
+                        end else if (tare_btn_pressed) begin
+                            state <= ST_TARE;
+                        end
                     end
                 end
 
@@ -243,7 +263,7 @@ module top_principal (
                         end
                     end
                     
-                    if (cooldown_sec == 16'd0) begin
+                    if (cooldown_sec == 16'd0 && (w_weight_bcd == 16'h0000 || w_weight_sign)) begin
                         state <= ST_IDLE;
                     end
                 end
